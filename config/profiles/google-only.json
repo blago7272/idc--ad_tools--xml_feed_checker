@@ -1,0 +1,8 @@
+{
+  "description": "Validate with the bundled Google Ads rules only.",
+  "platforms": [
+    "google_ads"
+  ],
+  "base_config": "../feed_rules.json",
+  "aspect_config": "../semantic_aspects.json"
+}

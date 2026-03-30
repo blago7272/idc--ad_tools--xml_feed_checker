@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import sys
@@ -11,7 +12,7 @@ import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from pathlib import Path
 from statistics import median
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from description_quality import DescriptionAnalyzer
@@ -77,11 +78,134 @@ def feed_slug(path: Path) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", raw)
 
 
+def load_json(path: Path) -> Dict[str, object]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def deep_merge(base: Any, override: Any) -> Any:
+    if isinstance(base, dict) and isinstance(override, dict):
+        merged = copy.deepcopy(base)
+        for key, value in override.items():
+            if key in merged:
+                merged[key] = deep_merge(merged[key], value)
+            else:
+                merged[key] = copy.deepcopy(value)
+        return merged
+    return copy.deepcopy(override)
+
+
+def resolve_optional_path(raw_path: Optional[str]) -> Optional[Path]:
+    if not raw_path:
+        return None
+    return Path(raw_path).expanduser().resolve()
+
+
+def resolve_relative_path(raw_path: str, base_dir: Path) -> Path:
+    candidate = Path(raw_path).expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (base_dir / candidate).resolve()
+
+
+def resolve_profile_path(profile: str, profiles_dir: Path) -> Path:
+    candidate = Path(profile).expanduser()
+    if candidate.exists():
+        return candidate.resolve()
+    suffix = candidate.suffix or ".json"
+    name = candidate.stem if candidate.suffix else candidate.name
+    return (profiles_dir / f"{name}{suffix}").resolve()
+
+
+def available_profiles(profiles_dir: Path) -> List[Tuple[str, Path]]:
+    if not profiles_dir.exists():
+        return []
+    return sorted((path.stem, path) for path in profiles_dir.glob("*.json"))
+
+
+def print_profiles(profiles_dir: Path) -> None:
+    profiles = available_profiles(profiles_dir)
+    if not profiles:
+        print("No bundled profiles found.")
+        return
+    for name, path in profiles:
+        data = load_json(path)
+        description = str(data.get("description", "")).strip()
+        print(f"{name}\t{description}")
+
+
+def load_rule_bundle(
+    project_root: Path,
+    profile_name: Optional[str],
+    profiles_dir: Path,
+    config_path_override: Optional[Path],
+    aspect_config_path_override: Optional[Path],
+    config_override_path: Optional[Path],
+    aspect_override_path: Optional[Path],
+    platforms_override: Optional[List[str]],
+) -> Tuple[Dict[str, object], Dict[str, object], List[str], Dict[str, Optional[str]]]:
+    default_config_path = project_root / "config" / "feed_rules.json"
+    default_aspect_config_path = project_root / "config" / "semantic_aspects.json"
+
+    profile_path: Optional[Path] = None
+    profile_data: Dict[str, object] = {}
+    if profile_name and profile_name.lower() != "none":
+        profile_path = resolve_profile_path(profile_name, profiles_dir)
+        if not profile_path.exists():
+            raise FileNotFoundError(f"Profile not found: {profile_path}")
+        profile_data = load_json(profile_path)
+
+    config_path = config_path_override
+    if config_path is None:
+        if profile_path and profile_data.get("base_config"):
+            config_path = resolve_relative_path(str(profile_data["base_config"]), profile_path.parent)
+        else:
+            config_path = default_config_path.resolve()
+
+    aspect_config_path = aspect_config_path_override
+    if aspect_config_path is None:
+        if profile_path and profile_data.get("aspect_config"):
+            aspect_config_path = resolve_relative_path(str(profile_data["aspect_config"]), profile_path.parent)
+        else:
+            aspect_config_path = default_aspect_config_path.resolve()
+
+    rules = load_json(config_path)
+    if profile_data.get("config_overrides"):
+        rules = deep_merge(rules, profile_data["config_overrides"])
+    if config_override_path is not None:
+        rules = deep_merge(rules, load_json(config_override_path))
+
+    aspect_config: Dict[str, object] = {}
+    if aspect_config_path.exists():
+        aspect_config = load_json(aspect_config_path)
+    if profile_data.get("aspect_overrides"):
+        aspect_config = deep_merge(aspect_config, profile_data["aspect_overrides"])
+    if aspect_override_path is not None:
+        aspect_config = deep_merge(aspect_config, load_json(aspect_override_path))
+
+    if platforms_override:
+        platforms = list(platforms_override)
+    elif profile_data.get("platforms"):
+        platforms = list(profile_data["platforms"])
+    else:
+        platforms = ["google_ads", "meta_ads"]
+
+    metadata = {
+        "profile": profile_path.stem if profile_path else None,
+        "profile_path": str(profile_path) if profile_path else None,
+        "config_path": str(config_path),
+        "aspect_config_path": str(aspect_config_path) if aspect_config_path else None,
+        "config_override_path": str(config_override_path) if config_override_path else None,
+        "aspect_override_path": str(aspect_override_path) if aspect_override_path else None,
+    }
+    return rules, aspect_config, platforms, metadata
+
+
 def parse_feed(
     path: Path,
     rules: Dict[str, object],
     platforms: Iterable[str],
     analyzer: DescriptionAnalyzer,
+    metadata: Dict[str, Optional[str]],
 ) -> Dict[str, object]:
     required_fields = list(rules["required_fields"])
     expected_fields = list(rules["expected_fields"])
@@ -337,6 +461,8 @@ def parse_feed(
         "feed_slug": feed_slug(path),
         "status": status,
         "platforms": list(platforms),
+        "profile": metadata.get("profile"),
+        "config_sources": metadata,
         "item_count": item_count,
         "backend_status": analyzer.backend_status(),
         "errors": dict(errors),
@@ -377,11 +503,15 @@ def render_markdown(report: Dict[str, object]) -> str:
         f"- Feed: `{report['feed_path']}`",
         f"- Status: `{report['status']}`",
         f"- Platforms: `{', '.join(report['platforms'])}`",
+        f"- Profile: `{report['profile'] or 'none'}`",
         f"- Items: `{report['item_count']}`",
+        f"- Rules: `{report['config_sources']['config_path']}`",
         "",
         "## Backends",
         "",
     ]
+    if report["config_sources"].get("aspect_config_path"):
+        lines.insert(7, f"- Aspect rules: `{report['config_sources']['aspect_config_path']}`")
 
     for backend, enabled in report["backend_status"].items():
         lines.append(f"- `{backend}`: `{'available' if enabled else 'not installed'}`")
@@ -454,18 +584,38 @@ def write_report(report: Dict[str, object], output_dir: Path) -> Tuple[Path, Pat
 def build_parser() -> argparse.ArgumentParser:
     project_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("feeds", nargs="+", help="Paths to XML feed files.")
+    parser.add_argument("feeds", nargs="*", help="Paths to XML feed files.")
+    parser.add_argument(
+        "--profile",
+        default="google-meta-default",
+        help="Bundled profile name or path to a profile JSON file. Use 'none' to disable profiles.",
+    )
+    parser.add_argument(
+        "--profiles-dir",
+        default=str(project_root / "config" / "profiles"),
+        help="Directory containing bundled profile JSON files.",
+    )
+    parser.add_argument(
+        "--list-profiles",
+        action="store_true",
+        help="List bundled profiles and exit.",
+    )
     parser.add_argument(
         "--config",
-        default=str(project_root / "config" / "feed_rules.json"),
-        help="Path to the JSON rule file.",
+        default=None,
+        help="Path to a full base rules JSON file. Overrides the profile base config.",
+    )
+    parser.add_argument(
+        "--config-override",
+        default=None,
+        help="Path to a partial rules JSON file merged on top of the base config.",
     )
     parser.add_argument(
         "--platforms",
         nargs="+",
-        default=["google_ads", "meta_ads"],
+        default=None,
         choices=["google_ads", "meta_ads"],
-        help="Platforms to validate against.",
+        help="Override active platforms instead of using the profile default.",
     )
     parser.add_argument(
         "--out-dir",
@@ -474,8 +624,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--aspect-config",
-        default=str(project_root / "config" / "semantic_aspects.json"),
-        help="Path to the aspect rule JSON file.",
+        default=None,
+        help="Path to a full aspect-rule JSON file. Overrides the profile aspect config.",
+    )
+    parser.add_argument(
+        "--aspect-override",
+        default=None,
+        help="Path to a partial aspect-rule JSON file merged on top of the base aspect config.",
     )
     return parser
 
@@ -484,17 +639,37 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    config_path = Path(args.config).expanduser().resolve()
     output_dir = Path(args.out_dir).expanduser().resolve()
-    aspect_config_path = Path(args.aspect_config).expanduser().resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    profiles_dir = Path(args.profiles_dir).expanduser().resolve()
+    if args.list_profiles:
+        print_profiles(profiles_dir)
+        return 0
+    if not args.feeds:
+        parser.error("At least one feed path is required unless --list-profiles is used.")
 
-    rules = json.loads(config_path.read_text(encoding="utf-8"))
-    aspect_groups = {}
-    if aspect_config_path.exists():
-        aspect_groups = json.loads(aspect_config_path.read_text(encoding="utf-8")).get("groups", {})
+    config_override_path = resolve_optional_path(args.config_override)
+    aspect_override_path = resolve_optional_path(args.aspect_override)
+    config_path_override = resolve_optional_path(args.config)
+    aspect_config_path_override = resolve_optional_path(args.aspect_config)
+
+    try:
+        rules, aspect_config, platforms, metadata = load_rule_bundle(
+            project_root=project_root,
+            profile_name=args.profile,
+            profiles_dir=profiles_dir,
+            config_path_override=config_path_override,
+            aspect_config_path_override=aspect_config_path_override,
+            config_override_path=config_override_path,
+            aspect_override_path=aspect_override_path,
+            platforms_override=args.platforms,
+        )
+    except FileNotFoundError as exc:
+        parser.error(str(exc))
+    aspect_groups = dict(aspect_config.get("groups", {}))
     analyzer = DescriptionAnalyzer(rules["description_quality"], aspect_groups=aspect_groups)
 
-    for platform in args.platforms:
+    for platform in platforms:
         if platform not in rules["platforms"]:
             parser.error(f"Unknown platform: {platform}")
 
@@ -503,7 +678,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         feed_path = Path(feed).expanduser().resolve()
         if not feed_path.exists():
             parser.error(f"Feed not found: {feed_path}")
-        report = parse_feed(feed_path, rules, args.platforms, analyzer)
+        report = parse_feed(feed_path, rules, platforms, analyzer, metadata)
         json_path, md_path = write_report(report, output_dir)
         reports.append((report, json_path, md_path))
 
@@ -512,6 +687,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             json.dumps(
                 {
                     "feed": report["feed_path"],
+                    "profile": report["profile"],
                     "status": report["status"],
                     "items": report["item_count"],
                     "errors": sum(report["errors"].values()),

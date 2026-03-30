@@ -1,0 +1,8 @@
+{
+  "description": "Validate with the bundled Meta Ads rules only.",
+  "platforms": [
+    "meta_ads"
+  ],
+  "base_config": "../feed_rules.json",
+  "aspect_config": "../semantic_aspects.json"
+}

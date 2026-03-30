@@ -10,7 +10,7 @@ Use this skill to validate one or more XML catalog feeds from any source system.
 
 ## Workflow
 1. Collect the feed path or paths to validate.
-2. Choose whether to use the default rules or a custom rule file.
+2. Choose a bundled profile or disable profiles and supply custom config files.
 3. Run the validator script.
 4. Review the Markdown report first for a readable summary, then the JSON report for automation or deeper analysis.
 5. Fix feed-generation or source-data issues at the source layer instead of patching the exported XML manually.
@@ -21,18 +21,40 @@ Use this skill to validate one or more XML catalog feeds from any source system.
 python3 scripts/validate_feed.py /path/to/feed.xml
 ```
 
+- List bundled profiles:
+```bash
+python3 scripts/validate_feed.py --list-profiles
+```
+
+- Validate with a bundled profile:
+```bash
+python3 scripts/validate_feed.py \
+  /path/to/feed.xml \
+  --profile google-only
+```
+
 - Validate multiple feeds in one run:
 ```bash
 python3 scripts/validate_feed.py /path/to/feed-a.xml /path/to/feed-b.xml
 ```
 
-- Use custom rule files and a custom output directory:
+- Disable profiles and use full custom config files:
 ```bash
 python3 scripts/validate_feed.py \
   /path/to/feed.xml \
+  --profile none \
   --config /path/to/feed_rules.json \
   --aspect-config /path/to/semantic_aspects.json \
   --out-dir /path/to/out
+```
+
+- Keep a bundled profile and merge partial overrides on top:
+```bash
+python3 scripts/validate_feed.py \
+  /path/to/feed.xml \
+  --profile google-meta-default \
+  --config-override /path/to/rules.override.json \
+  --aspect-override /path/to/aspects.override.json
 ```
 
 ## What The Validator Checks
@@ -55,6 +77,7 @@ python3 scripts/validate_feed.py \
 - Description analyzer: `scripts/description_quality.py`
 - Base rules: `config/feed_rules.json`
 - Category aspect rules: `config/semantic_aspects.json`
+- Bundled profiles: `config/profiles/*.json`
 
 ## Interpreting Results
 - Treat these as blocking:
@@ -69,8 +92,11 @@ python3 scripts/validate_feed.py \
   - duplicate low-information descriptions
 
 ## Customization Guidance
-- If the feed uses different currencies, required fields, or exact-value rules, copy `config/feed_rules.json` and adjust the config rather than editing the validator logic first.
-- If the feed uses different product families, copy `config/semantic_aspects.json` and adapt the category aspect rules there.
+- Use a bundled profile when the default Google/Meta combinations are enough.
+- Use `--config` and `--aspect-config` when you want to replace the base config files entirely.
+- Use `--config-override` and `--aspect-override` when you only need a small delta on top of a bundled profile or base config.
+- If the feed uses different currencies, required fields, or exact-value rules, adjust the config files rather than editing the validator logic first.
+- If the feed uses different product families, adapt the category aspect rules in the aspect config.
 - Keep the core skill source-agnostic. Platform-specific mapping belongs in the input config, not in the main workflow.
 
 ## Reporting Guidance
