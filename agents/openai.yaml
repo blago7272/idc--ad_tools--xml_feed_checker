@@ -1,0 +1,4 @@
+interface:
+  display_name: "XML Feed Quality Checker"
+  short_description: "Validate XML product feeds and catalog quality"
+  default_prompt: "Use $xml-feed-quality-checker to validate one or more product XML feeds and summarize structural, pricing, URL, and content issues."

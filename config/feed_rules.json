@@ -1,0 +1,57 @@
+{
+  "expected_currency": "EUR",
+  "required_fields": [
+    "id",
+    "title",
+    "description",
+    "link",
+    "image_link",
+    "condition",
+    "availability",
+    "price",
+    "brand",
+    "google_product_category",
+    "product_type"
+  ],
+  "expected_fields": [
+    "sale_price",
+    "item_group_id",
+    "size"
+  ],
+  "url_fields": [
+    "link",
+    "image_link"
+  ],
+  "exact_values": {
+    "condition": "new",
+    "availability": "in stock"
+  },
+  "description_quality": {
+    "expected_language": "bg",
+    "warn_short_chars": 80,
+    "recommended_min_chars": 150,
+    "soft_long_chars": 1500,
+    "google_max_chars": 5000,
+    "meta_max_chars": 9999,
+    "warn_all_caps_ratio": 0.45,
+    "warn_low_unique_token_ratio": 0.45,
+    "warn_low_lemma_unique_ratio": 0.4,
+    "warn_title_overlap_ratio": 0.85,
+    "warn_min_sentences": 1,
+    "required_aspect_warn_ratio": 0.67,
+    "sample_size_per_issue": 5
+  },
+  "platforms": {
+    "google_ads": {
+      "description_max_chars": 5000,
+      "sale_price_must_be_lower_than_price": true,
+      "docs_url": "https://support.google.com/merchants/answer/7052112?hl=en"
+    },
+    "meta_ads": {
+      "description_max_chars": 9999,
+      "title_recommended_max_chars": 65,
+      "sale_price_must_be_lower_than_price": true,
+      "docs_url": "https://developers.facebook.com/docs/marketing-api/catalog/reference/"
+    }
+  }
+}
