@@ -8,6 +8,8 @@ description: Validate XML product and catalog feeds for Google Ads and Meta Ads 
 ## Overview
 Use this skill to validate one or more XML catalog feeds from any source system. The bundled validator produces deterministic JSON and Markdown reports with blocking errors, quality warnings, category-level aspect gaps, and remediation-ready samples.
 
+For a step-by-step usage guide with profile and custom-config examples, see `references/usage-guide.md`.
+
 ## Workflow
 1. Collect the feed path or paths to validate.
 2. Choose a bundled profile or disable profiles and supply custom config files.
@@ -78,6 +80,7 @@ python3 scripts/validate_feed.py \
 - Base rules: `config/feed_rules.json`
 - Category aspect rules: `config/semantic_aspects.json`
 - Bundled profiles: `config/profiles/*.json`
+- Usage guide: `references/usage-guide.md`
 
 ## Interpreting Results
 - Treat these as blocking:
